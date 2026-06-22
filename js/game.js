@@ -29,37 +29,49 @@ function connectWebSocket() {
     };
 }
 
+// frontend/js/game.js 의 handleServerMessage 함수를 이 코드로 덮어쓰기 하세요.
+
 async function handleServerMessage(data) {
     switch(data.type) {
         case "SYSTEM":
             appendMessage("시스템", data.message, "msg-system");
             break;
+            
         case "CHAT":
             appendMessage(data.sender, data.message, "msg-normal");
             break;
+            
         case "MAFIA_CHAT":
             appendMessage(`🩸마피아(${data.sender})`, data.message, "msg-mafia");
             break;
+            
         case "ROLE_ASSIGN":
             myRole = data.role;
-            document.getElementById('roleInfo').innerText = data.message;
-            document.getElementById('roleInfo').style.display = 'block';
-            
-            // 1번 조항: 방장 메뉴 권한 및 상단 표기 필터링 처리
-            if (data.isHost) {
-                document.getElementById('hostBadge').style.display = 'inline-block';
-                document.getElementById('hostControls').style.display = 'block';
-            } else {
-                document.getElementById('hostControls').style.display = 'none';
-            }
-            // 직업 배정 완료 시 무료 음성인식 캡처 시작 초기화
-            await initAudioConnection();
+            const roleInfo = document.getElementById('roleInfo');
+            roleInfo.innerText = data.message;
+            roleInfo.style.display = 'block';
             break;
             
         case "USER_LIST":
             userListCache = data.users;
             renderUserList();
-            // 새로운 사람이 들어왔을 때 WebRTC P2P 오디오 채널 형성 개시
+            
+            // ✨ [수정] 유저 목록이 갱신될 때마다 내가 방장인지 체크하여 로비 단계에서 메뉴 노출
+            const myInfo = data.users.find(u => u.userId === username);
+            if (myInfo && myInfo.isHost) {
+                document.getElementById('hostBadge').style.display = 'inline-block';
+                
+                // 게임 시작 전(LOBBY)에만 게임 시작 버튼 패널을 보여줍니다.
+                if (currentPhase === "LOBBY") {
+                    document.getElementById('hostControls').style.display = 'block';
+                } else {
+                    document.getElementById('hostControls').style.display = 'none';
+                }
+            } else {
+                document.getElementById('hostBadge').style.display = 'none';
+                document.getElementById('hostControls').style.display = 'none';
+            }
+            
             await syncPeerConnections(data.users);
             break;
             
@@ -68,19 +80,29 @@ async function handleServerMessage(data) {
             const phaseDisplay = document.getElementById('phaseDisplay');
             isNight = (data.phase === "NIGHT");
             
+            // ✨ [수정] 낮/밤 페이즈가 변했을 때도 게임이 진행 중이면 방장 메뉴(시작 버튼)를 자동으로 숨김
+            const hostCheck = userListCache.find(u => u.userId === username);
+            if (hostCheck && hostCheck.isHost && currentPhase === "LOBBY") {
+                document.getElementById('hostControls').style.display = 'block';
+            } else {
+                document.getElementById('hostControls').style.display = 'none';
+            }
+            
             if (isNight) {
                 phaseDisplay.innerText = "🌙 밤 (NIGHT)";
                 document.body.className = "night";
-                toggleAudioTracks(false); // 3번 조항: 밤에는 전원 헤드셋/마이크 음소거 차단
+                toggleAudioTracks(false); // 밤에는 전원 마이크/헤드셋 차단
+                appendMessage("시스템", data.message, "msg-system");
+                
             } else {
                 phaseDisplay.innerText = data.phase === "VOTE" ? "🗳️ 투표 진행 중" : `☀️ ${data.day}일차 낮`;
                 document.body.className = "day";
-                toggleAudioTracks(true);  // 낮이 되면 오디오 권한 허용 복구
+                toggleAudioTracks(true);  // 낮에는 다시 소통 허용
+                appendMessage("situ", data.message, "msg-system");
             }
             renderUserList(); 
             break;
 
-        // WebRTC P2P 시그널링 메시지 가로채기 핸들러
         case "RTC_OFFER":
             await handleRtcOffer(data.sender, data.payload);
             break;
@@ -92,7 +114,7 @@ async function handleServerMessage(data) {
                 await peerConnections[data.sender].addIceCandidate(new RTCIceCandidate(data.payload));
             }
             break;
-        // 3번 조항: 실시간 말할 때 이름 불 켜주기 상태 감지
+            
         case "USER_SPEAKING":
             const userEl = document.getElementById(`user-${data.userId}`);
             if (userEl) {
