@@ -1,9 +1,14 @@
 // frontend/js/game.js
+
 const urlParams = new URLSearchParams(window.location.search);
 const roomCode = urlParams.get('room');
-const username = localStorage.getItem('mafia_username');
 
-if (!roomCode || !username) { window.location.href = "index.html"; }
+// [수정] 탭별로 독립적인 세션을 유지하기 위해 sessionStorage에서 닉네임을 가져옵니다.
+const username = sessionStorage.getItem('mafia_username');
+
+if (!roomCode || !username) { 
+    window.location.href = "index.html"; 
+}
 document.getElementById('displayRoomCode').innerText = roomCode;
 
 const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
@@ -15,10 +20,11 @@ let myRole = "시민";
 let isNight = false;
 let currentPhase = "LOBBY";
 let userListCache = [];
+let phaseTimer = null;
 
 // WebRTC 관련 상태 전역 관리
 let localStream;
-let peerConnections = {}; // {userId: RTCPeerConnection}
+let peerConnections = {}; 
 const rtcConfig = { iceServers: [{ urls: "stun:stun.l.google.com:19302" }] };
 
 function connectWebSocket() {
@@ -27,9 +33,28 @@ function connectWebSocket() {
         const data = JSON.parse(event.data);
         await handleServerMessage(data);
     };
+    ws.onclose = () => {
+        appendMessage("시스템", "서버와의 연결이 끊어졌습니다.", "msg-system");
+    };
 }
 
-// frontend/js/game.js 의 handleServerMessage 함수를 이 코드로 덮어쓰기 하세요.
+function startClientTimer(duration, phaseName) {
+    clearInterval(phaseTimer);
+    let timeLeft = duration;
+    const phaseDisplay = document.getElementById('phaseDisplay');
+    
+    phaseDisplay.innerHTML = `${phaseName} <span style="color: #f1c40f;">(${timeLeft}초 남음)</span>`;
+    
+    phaseTimer = setInterval(() => {
+        timeLeft--;
+        if (timeLeft <= 0) {
+            clearInterval(phaseTimer);
+            phaseDisplay.innerHTML = `${phaseName} <span style="color: #e74c3c;">(시간 종료)</span>`;
+        } else {
+            phaseDisplay.innerHTML = `${phaseName} <span style="color: #f1c40f;">(${timeLeft}초 남음)</span>`;
+        }
+    }, 1000);
+}
 
 async function handleServerMessage(data) {
     switch(data.type) {
@@ -50,18 +75,16 @@ async function handleServerMessage(data) {
             const roleInfo = document.getElementById('roleInfo');
             roleInfo.innerText = data.message;
             roleInfo.style.display = 'block';
+            await initAudioConnection();
             break;
             
         case "USER_LIST":
             userListCache = data.users;
             renderUserList();
             
-            // ✨ [수정] 유저 목록이 갱신될 때마다 내가 방장인지 체크하여 로비 단계에서 메뉴 노출
             const myInfo = data.users.find(u => u.userId === username);
             if (myInfo && myInfo.isHost) {
                 document.getElementById('hostBadge').style.display = 'inline-block';
-                
-                // 게임 시작 전(LOBBY)에만 게임 시작 버튼 패널을 보여줍니다.
                 if (currentPhase === "LOBBY") {
                     document.getElementById('hostControls').style.display = 'block';
                 } else {
@@ -77,38 +100,42 @@ async function handleServerMessage(data) {
             
         case "PHASE_CHANGE":
             currentPhase = data.phase;
-            const phaseDisplay = document.getElementById('phaseDisplay');
             isNight = (data.phase === "NIGHT");
             
-            // ✨ [수정] 낮/밤 페이즈가 변했을 때도 게임이 진행 중이면 방장 메뉴(시작 버튼)를 자동으로 숨김
-            const hostCheck = userListCache.find(u => u.userId === username);
-            if (hostCheck && hostCheck.isHost && currentPhase === "LOBBY") {
-                document.getElementById('hostControls').style.display = 'block';
-            } else {
+            if (isNight) {
+                document.body.className = "night";
+                document.getElementById('chatInput').placeholder = myRole === "마피아" ? "마피아 전용 채팅 모드..." : "시민은 밤에 채팅할 수 없습니다.";
+                toggleAudioTracks(false); 
+                startClientTimer(data.duration, "🌙 밤 (NIGHT)");
+            } else if (data.phase === "DAY") {
+                document.body.className = "day";
+                document.getElementById('chatInput').placeholder = "메시지를 입력하세요...";
+                toggleAudioTracks(true);  
+                startClientTimer(data.duration, `☀️ ${data.day}일차 낮 (토론)`);
+            } else if (data.phase === "VOTE") {
+                document.body.className = "day";
+                document.getElementById('chatInput').placeholder = "투표 중에는 채팅이 가능합니다...";
+                startClientTimer(data.duration, "🗳️ 투표 진행 중");
+            }
+            
+            if (currentPhase !== "LOBBY") {
                 document.getElementById('hostControls').style.display = 'none';
             }
             
-            if (isNight) {
-                phaseDisplay.innerText = "🌙 밤 (NIGHT)";
-                document.body.className = "night";
-                toggleAudioTracks(false); // 밤에는 전원 마이크/헤드셋 차단
-                appendMessage("시스템", data.message, "msg-system");
-                
-            } else {
-                phaseDisplay.innerText = data.phase === "VOTE" ? "🗳️ 투표 진행 중" : `☀️ ${data.day}일차 낮`;
-                document.body.className = "day";
-                toggleAudioTracks(true);  // 낮에는 다시 소통 허용
-                appendMessage("situ", data.message, "msg-system");
-            }
+            appendMessage("시스템", data.message, "msg-system");
             renderUserList(); 
             break;
 
         case "RTC_OFFER":
             await handleRtcOffer(data.sender, data.payload);
             break;
+            
         case "RTC_ANSWER":
-            await peerConnections[data.sender].setRemoteDescription(new RTCSessionDescription(data.payload));
+            if (peerConnections[data.sender]) {
+                await peerConnections[data.sender].setRemoteDescription(new RTCSessionDescription(data.payload));
+            }
             break;
+            
         case "RTC_ICE":
             if (peerConnections[data.sender]) {
                 await peerConnections[data.sender].addIceCandidate(new RTCIceCandidate(data.payload));
@@ -125,7 +152,6 @@ async function handleServerMessage(data) {
     }
 }
 
-// 2&4번 조항: 사이드바 유저 인터페이스 구성 및 투표/스킬 매핑 기능
 function renderUserList() {
     const container = document.getElementById('userList');
     container.innerHTML = "";
@@ -139,7 +165,6 @@ function renderUserList() {
         if (user.isHost) nameText += " (방장)";
         div.innerHTML = `<span>${nameText}</span>`;
         
-        // 내 자신에겐 투표나 타겟팅을 하지 못하도록 설계 보완
         if (user.isAlive && user.userId !== username) {
             if (currentPhase === "VOTE") {
                 const btn = document.createElement('button');
@@ -178,7 +203,6 @@ function sendAction(actionType, targetId, subAction = null) {
     }));
 }
 
-// 3번 조항: 하드웨어 마이크 입력 장치 스트림 공유 가로채기 함수
 async function initAudioConnection() {
     try {
         localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
@@ -188,7 +212,6 @@ async function initAudioConnection() {
     }
 }
 
-// 3번 조항: 실시간 말하기 유저 이펙트용 볼륨 레벨 게이지 트래킹 연산 로직
 function startVoiceActivityDetection(stream) {
     const audioContext = new (window.AudioContext || window.webkitAudioContext)();
     const source = audioContext.createMediaStreamSource(stream);
@@ -207,7 +230,6 @@ function startVoiceActivityDetection(stream) {
         for (let i = 0; i < bufferLength; i++) { sum += dataArray[i]; }
         let average = sum / bufferLength;
         
-        // 일정 음량 이상 말하는 상태 검증 스레스홀드 매핑
         let speakingState = average > 15; 
         if (speakingState !== isSpeaking) {
             isSpeaking = speakingState;
@@ -218,7 +240,6 @@ function startVoiceActivityDetection(stream) {
     }, 250);
 }
 
-// P2P 커넥션 풀 싱크 맞추기 가동 로직
 async function syncPeerConnections(users) {
     if (!localStream) return;
     users.forEach(async (user) => {
@@ -243,7 +264,6 @@ async function syncPeerConnections(users) {
                 audioEl.srcObject = e.streams[0];
             };
 
-            // 방에 나중에 들어온 사람이 기존 방 회원들에게 Offer 발행
             if (username > user.userId) { 
                 const offer = await pc.createOffer();
                 await pc.setLocalDescription(offer);
@@ -267,7 +287,6 @@ function toggleAudioTracks(enable) {
     if (localStream) {
         localStream.getAudioTracks().forEach(track => track.enabled = enable);
     }
-    // 상대방 소리 듣기 권한(헤드셋 차단/복구) 제어
     const remoteAudios = document.getElementById('remoteAudios').querySelectorAll('audio');
     remoteAudios.forEach(audio => { audio.muted = !enable; });
 }
@@ -285,14 +304,43 @@ function sendMessage() {
     const input = document.getElementById('chatInput');
     const text = input.value.trim();
     if (!text) return;
-    if (isNight && myRole !== "마피아") { alert("시민은 밤에 침묵해야 합니다."); return; }
+    if (isNight && myRole !== "마피아") { 
+        alert("시민은 밤에 침묵해야 합니다."); 
+        input.value = "";
+        return; 
+    }
     ws.send(JSON.stringify({ action: "CHAT", message: text }));
     input.value = "";
 }
 
 document.getElementById('sendBtn').addEventListener('click', sendMessage);
-document.getElementById('chatInput').addEventListener('keypress', (e) => { if (e.key === 'Enter') sendMessage(); });
-document.getElementById('startBtn').addEventListener('click', () => { ws.send(JSON.stringify({ action: "START_GAME" })); });
-document.getElementById('leaveRoomBtn').addEventListener('click', () => { if(confirm("퇴장하시겠습니까?")) { if(ws)ws.close(); window.location.href="index.html"; } });
+document.getElementById('chatInput').addEventListener('keypress', (e) => { 
+    if (e.key === 'Enter') sendMessage(); 
+});
+
+document.getElementById('startBtn').addEventListener('click', () => {
+    const dayTimeInput = document.getElementById('dayTimeInput');
+    const nightTimeInput = document.getElementById('nightTimeInput');
+    
+    const dayTime = dayTimeInput ? parseInt(dayTimeInput.value) || 30 : 30;
+    const nightTime = nightTimeInput ? parseInt(nightTimeInput.value) || 20 : 20;
+
+    ws.send(JSON.stringify({ 
+        action: "START_GAME",
+        settings: {
+            day_time: dayTime,
+            night_time: nightTime
+        }
+    }));
+});
+
+document.getElementById('leaveRoomBtn').addEventListener('click', () => { 
+    if(confirm("퇴장하시겠습니까?")) { 
+        if(ws) ws.close(); 
+        // [수정] 퇴장 시 저장된 세션 제거
+        sessionStorage.removeItem('mafia_username');
+        window.location.href="index.html"; 
+    } 
+});
 
 window.onload = connectWebSocket;

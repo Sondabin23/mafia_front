@@ -3,7 +3,7 @@
 // 환경 자동 감지 및 API 주소 설정
 const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
 
-// 👉 배포 후 아래 빈칸에 Render에서 발급받은 백엔드 도메인을 적어주세요. (예: my-mafia-api.onrender.com)
+// 배포 후 아래 빈칸에 Render에서 발급받은 백엔드 도메인을 적어주세요.
 const RENDER_BACKEND_DOMAIN = "mafia-api-srab.onrender.com"; 
 
 const BACKEND_URL = isLocal 
@@ -42,6 +42,7 @@ document.getElementById('joinRoomBtn').addEventListener('click', () => {
         return;
     }
 
-    localStorage.setItem('mafia_username', username);
+    // [수정] 여러 탭에서 테스트해도 닉네임이 꼬이지 않도록 sessionStorage 사용
+    sessionStorage.setItem('mafia_username', username);
     window.location.href = `game.html?room=${roomCode}`;
 });

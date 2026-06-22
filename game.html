@@ -36,9 +36,17 @@
         </div>
 
         <div id="hostControls">
-            <strong>👑 방장 메뉴:</strong>
-            <button id="startBtn">게임 시작</button>
-        </div>
+    <strong>👑 방장 설정 메뉴:</strong>
+    <div style="margin: 10px 0; display: flex; gap: 15px; font-size: 0.9em;">
+        <label>☀️ 낮 시간: 
+            <input type="number" id="dayTimeInput" value="30" min="5" style="width: 50px; padding: 3px; background: rgba(0,0,0,0.5); color: #f39c12; border: 1px solid #f39c12; text-align: center;"> 초
+        </label>
+        <label>🌙 밤 시간: 
+            <input type="number" id="nightTimeInput" value="20" min="5" style="width: 50px; padding: 3px; background: rgba(0,0,0,0.5); color: #f39c12; border: 1px solid #f39c12; text-align: center;"> 초
+        </label>
+    </div>
+    <button id="startBtn" style="margin-top: 5px;">🎮 설정 적용 및 게임 시작</button>
+    </div>
     </div>
 
     <script src="js/game.js"></script>
