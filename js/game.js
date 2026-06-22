@@ -2,8 +2,6 @@
 
 const urlParams = new URLSearchParams(window.location.search);
 const roomCode = urlParams.get('room');
-
-// [수정] 탭별로 독립적인 세션을 유지하기 위해 sessionStorage에서 닉네임을 가져옵니다.
 const username = sessionStorage.getItem('mafia_username');
 
 if (!roomCode || !username) { 
@@ -19,10 +17,10 @@ let ws;
 let myRole = "시민"; 
 let isNight = false;
 let currentPhase = "LOBBY";
+let currentDefenseTarget = null;
 let userListCache = [];
 let phaseTimer = null;
 
-// WebRTC 관련 상태 전역 관리
 let localStream;
 let peerConnections = {}; 
 const rtcConfig = { iceServers: [{ urls: "stun:stun.l.google.com:19302" }] };
@@ -85,11 +83,8 @@ async function handleServerMessage(data) {
             const myInfo = data.users.find(u => u.userId === username);
             if (myInfo && myInfo.isHost) {
                 document.getElementById('hostBadge').style.display = 'inline-block';
-                if (currentPhase === "LOBBY") {
-                    document.getElementById('hostControls').style.display = 'block';
-                } else {
-                    document.getElementById('hostControls').style.display = 'none';
-                }
+                if (currentPhase === "LOBBY") document.getElementById('hostControls').style.display = 'block';
+                else document.getElementById('hostControls').style.display = 'none';
             } else {
                 document.getElementById('hostBadge').style.display = 'none';
                 document.getElementById('hostControls').style.display = 'none';
@@ -101,6 +96,7 @@ async function handleServerMessage(data) {
         case "PHASE_CHANGE":
             currentPhase = data.phase;
             isNight = (data.phase === "NIGHT");
+            let target = data.target;
             
             if (isNight) {
                 document.body.className = "night";
@@ -116,11 +112,16 @@ async function handleServerMessage(data) {
                 document.body.className = "day";
                 document.getElementById('chatInput').placeholder = "투표 중에는 채팅이 가능합니다...";
                 startClientTimer(data.duration, "🗳️ 투표 진행 중");
+            } else if (data.phase === "DEFENSE") {
+                document.body.className = "day";
+                startClientTimer(data.duration, `⚖️ 최후 변론: ${target}`);
+            } else if (data.phase === "FINAL_VOTE") {
+                document.body.className = "day";
+                currentDefenseTarget = target;
+                startClientTimer(data.duration, `🗳️ 찬반 투표: ${target} 처형`);
             }
             
-            if (currentPhase !== "LOBBY") {
-                document.getElementById('hostControls').style.display = 'none';
-            }
+            if (currentPhase !== "LOBBY") document.getElementById('hostControls').style.display = 'none';
             
             appendMessage("시스템", data.message, "msg-system");
             renderUserList(); 
@@ -162,32 +163,38 @@ function renderUserList() {
         div.className = `user-item ${user.isAlive ? '' : 'dead'}`;
         
         let nameText = user.userId;
-        if (user.isHost) nameText += " (방장)";
+        if (user.userId === username) nameText += " <span style='color: #2ecc71;'>(나)</span>";
+        if (user.isHost) nameText += " 👑";
         div.innerHTML = `<span>${nameText}</span>`;
         
         if (user.isAlive && user.userId !== username) {
             if (currentPhase === "VOTE") {
                 const btn = document.createElement('button');
                 btn.className = "action-btn";
-                btn.innerText = "투표";
+                btn.innerText = "지목";
                 btn.onclick = () => sendAction("VOTE", user.userId);
                 div.appendChild(btn);
+            } else if (currentPhase === "FINAL_VOTE" && user.userId === currentDefenseTarget) {
+                const btnYes = document.createElement('button');
+                btnYes.className = "action-btn"; btnYes.style.backgroundColor = "#c0392b"; btnYes.style.marginRight = "5px"; btnYes.innerText = "사형(찬성)";
+                btnYes.onclick = () => sendAction("FINAL_VOTE", null, "YES");
+                
+                const btnNo = document.createElement('button');
+                btnNo.className = "action-btn"; btnNo.style.backgroundColor = "#27ae60"; btnNo.innerText = "무죄(반대)";
+                btnNo.onclick = () => sendAction("FINAL_VOTE", null, "NO");
+                
+                const wrapper = document.createElement('div');
+                wrapper.appendChild(btnYes); wrapper.appendChild(btnNo);
+                div.appendChild(wrapper);
             } else if (currentPhase === "NIGHT") {
                 const btn = document.createElement('button');
                 btn.className = "action-btn";
-                
                 if (myRole === "마피아") {
-                    btn.innerText = "처형";
-                    btn.onclick = () => sendAction("NIGHT_ACTION", user.userId, "KILL");
-                    div.appendChild(btn);
+                    btn.innerText = "처형"; btn.onclick = () => sendAction("NIGHT_ACTION", user.userId, "KILL"); div.appendChild(btn);
                 } else if (myRole === "의사") {
-                    btn.innerText = "치료";
-                    btn.onclick = () => sendAction("NIGHT_ACTION", user.userId, "HEAL");
-                    div.appendChild(btn);
+                    btn.innerText = "치료"; btn.onclick = () => sendAction("NIGHT_ACTION", user.userId, "HEAL"); div.appendChild(btn);
                 } else if (myRole === "경찰") {
-                    btn.innerText = "조사";
-                    btn.onclick = () => sendAction("NIGHT_ACTION", user.userId, "INVESTIGATE");
-                    div.appendChild(btn);
+                    btn.innerText = "조사"; btn.onclick = () => sendAction("NIGHT_ACTION", user.userId, "INVESTIGATE"); div.appendChild(btn);
                 }
             }
         }
@@ -262,6 +269,8 @@ async function syncPeerConnections(users) {
                     document.getElementById('remoteAudios').appendChild(audioEl);
                 }
                 audioEl.srcObject = e.streams[0];
+                // 브라우저 정책 우회: 오디오 트랙을 활성화하여 강제 재생 시도
+                audioEl.play().catch(err => console.log("Audio play blocked by browser:", err));
             };
 
             if (username > user.userId) { 
@@ -273,14 +282,34 @@ async function syncPeerConnections(users) {
     });
 }
 
+// [수정] 오디오 송출 불가 버그 해결: 늦게 들어온 유저의 연결 객체(pc)를 완벽히 초기화하고 트랙을 바인딩합니다.
 async function handleRtcOffer(sender, offer) {
-    const pc = peerConnections[sender];
-    if (pc) {
-        await pc.setRemoteDescription(new RTCSessionDescription(offer));
-        const answer = await pc.createAnswer();
-        await pc.setLocalDescription(answer);
-        ws.send(JSON.stringify({ action: "RTC_ANSWER", target: sender, payload: answer }));
+    let pc = peerConnections[sender];
+    if (!pc) {
+        pc = new RTCPeerConnection(rtcConfig);
+        peerConnections[sender] = pc;
+        if (localStream) {
+            localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+        }
+        pc.onicecandidate = (e) => {
+            if (e.candidate) ws.send(JSON.stringify({ action: "RTC_ICE", target: sender, payload: e.candidate }));
+        };
+        pc.ontrack = (e) => {
+            let audioEl = document.getElementById(`audio-${sender}`);
+            if (!audioEl) {
+                audioEl = document.createElement('audio');
+                audioEl.id = `audio-${sender}`;
+                audioEl.autoplay = true;
+                document.getElementById('remoteAudios').appendChild(audioEl);
+            }
+            audioEl.srcObject = e.streams[0];
+            audioEl.play().catch(err => console.log("Audio play error:", err));
+        };
     }
+    await pc.setRemoteDescription(new RTCSessionDescription(offer));
+    const answer = await pc.createAnswer();
+    await pc.setLocalDescription(answer);
+    ws.send(JSON.stringify({ action: "RTC_ANSWER", target: sender, payload: answer }));
 }
 
 function toggleAudioTracks(enable) {
@@ -337,7 +366,6 @@ document.getElementById('startBtn').addEventListener('click', () => {
 document.getElementById('leaveRoomBtn').addEventListener('click', () => { 
     if(confirm("퇴장하시겠습니까?")) { 
         if(ws) ws.close(); 
-        // [수정] 퇴장 시 저장된 세션 제거
         sessionStorage.removeItem('mafia_username');
         window.location.href="index.html"; 
     } 
