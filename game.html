@@ -7,29 +7,37 @@
     <link rel="stylesheet" href="css/style.css">
 </head>
 <body class="day">
+    <div id="remoteAudios" style="display:none;"></div>
+
     <div class="game-container">
-        <div class="header" style="display: flex; justify-content: space-between; align-items: center;">
+        <div class="header">
             <div>
-                <h2 style="margin: 0 0 5px 0;">방 코드: <span id="displayRoomCode"></span></h2>
-                <h2 id="phaseDisplay" style="margin: 0;">대기 중 (LOBBY)</h2>
+                <h2>방 코드: <span id="displayRoomCode"></span> <span id="hostBadge" class="host-badge" style="display:none;">👑 방장</span></h2>
+                <h2 id="phaseDisplay">대기 중 (LOBBY)</h2>
             </div>
             <button id="leaveRoomBtn">🚪 나가기</button>
         </div>
 
         <div id="roleInfo"></div>
 
-        <div id="chatBox"></div>
-
-        <div class="input-area">
-            <input type="text" id="chatInput" placeholder="메시지를 입력하세요...">
-            <button id="sendBtn">전송</button>
+        <div class="main-layout">
+            <div class="chat-area">
+                <div id="chatBox"></div>
+                <div class="input-area">
+                    <input type="text" id="chatInput" placeholder="메시지를 입력하세요...">
+                    <button id="sendBtn">전송</button>
+                </div>
+            </div>
+            
+            <div class="sidebar">
+                <h3>👥 생존자 목록</h3>
+                <div id="userList"></div>
+            </div>
         </div>
 
         <div id="hostControls">
             <strong>👑 방장 메뉴:</strong>
             <button id="startBtn">게임 시작</button>
-            <button id="testNightBtn">강제 밤 전환</button>
-            <button id="testDayBtn">강제 낮 전환</button>
         </div>
     </div>
 
