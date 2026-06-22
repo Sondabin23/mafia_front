@@ -128,6 +128,26 @@ function controlAudio(enable) {
     }
 }
 
+// frontend/js/game.js 맨 아래에 추가
+
+// 방 나가기 버튼 이벤트
+document.getElementById('leaveRoomBtn').addEventListener('click', () => {
+    const confirmLeave = confirm("정말 방에서 나가시겠습니까?");
+    
+    if (confirmLeave) {
+        // 1. 웹소켓 연결이 있다면 명시적으로 종료 (백엔드에 Disconnect 이벤트 전달)
+        if (ws) {
+            ws.close();
+        }
+        
+        // 2. 로컬 스토리지에 저장된 닉네임 초기화 (선택 사항)
+        localStorage.removeItem('mafia_username');
+        
+        // 3. 로비 화면으로 이동
+        window.location.href = "index.html";
+    }
+});
+
 // 방장 컨트롤 버튼 이벤트
 document.getElementById('startBtn').addEventListener('click', () => {
     ws.send(JSON.stringify({ action: "START_GAME" }));
