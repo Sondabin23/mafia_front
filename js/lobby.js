@@ -4,7 +4,7 @@
 const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
 
 // 👉 배포 후 아래 빈칸에 Render에서 발급받은 백엔드 도메인을 적어주세요. (예: my-mafia-api.onrender.com)
-const RENDER_BACKEND_DOMAIN = "https://mafia-api-srab.onrender.com"; 
+const RENDER_BACKEND_DOMAIN = "mafia-api-srab.onrender.com"; 
 
 const BACKEND_URL = isLocal 
     ? "http://localhost:8000" 

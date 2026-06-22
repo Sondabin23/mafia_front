@@ -14,7 +14,7 @@ document.getElementById('displayRoomCode').innerText = roomCode;
 
 // 환경 자동 감지 및 웹소켓 주소 설정
 const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-const RENDER_BACKEND_DOMAIN = "https://mafia-api-srab.onrender.com"; // lobby.js와 동일하게 작성
+const RENDER_BACKEND_DOMAIN = "mafia-api-srab.onrender.com"; // lobby.js와 동일하게 작성
 
 // 로컬은 ws://, Render 배포 환경은 wss:// (보안 웹소켓) 사용
 const WS_BASE_URL = isLocal 
